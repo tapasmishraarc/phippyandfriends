@@ -1,0 +1,72 @@
+trigger:
+  batch: true
+  branches:
+    include: 
+    - refs/heads/*
+  paths:
+    include: 
+    - phippy/
+    exclude:
+    - README.md
+
+variables:
+  vmImage: 'ubuntu-16.04'
+  helmVersion: 1.14.0
+  projectName: phippy
+  registryServerName: '$(registryName).azurecr.io'
+  # define 3 more variables: registryName, registryLogin and registryPassword in the build pipeline in UI
+
+stages:
+- stage: Build
+  displayName: Build
+  jobs:
+  - job: Build
+    variables:
+      imageName: '$(projectName)'
+    displayName: build and push Docker image and Helm chart
+    pool:
+      vmImage: $(vmImage)
+    steps:
+    - bash: docker build -f $(system.defaultWorkingDirectory)/$(projectName)/Dockerfile -t $(registryServerName)/$(imageName):$(build.buildId) $(system.defaultWorkingDirectory)/$(projectName)
+      displayName: 'docker build'
+    - bash: |
+        docker login $(registryServerName) -u $(registryLogin) -p $(registryPassword)
+        docker push $(registryServerName)/$(imageName):$(build.buildId)
+      displayName: 'docker push'
+      condition: and(succeeded(), eq(variables['build.sourceBranch'], 'refs/heads/master'))
+    #- task: HelmInstaller@0
+    #  displayName: 'install helm'
+    #  inputs:
+    #    helmVersion: $(helmVersion)
+    #    checkLatestHelmVersion: false
+    - bash: |
+        helm init --client-only
+        helm package --version $(build.buildId) --destination $(build.artifactStagingDirectory) $(system.defaultWorkingDirectory)/$(projectName)/charts/$(projectName)
+      displayName: 'helm package'
+    - bash: az acr helm push -n $(registryName) -u $(registryLogin) -p $(registryPassword) $(build.artifactStagingDirectory)/$(projectName)-$(build.buildId).tgz
+      displayName: 'az acr helm push'
+      condition: and(succeeded(), eq(variables['build.sourceBranch'], 'refs/heads/master'))
+- stage: Release
+  displayName: Release
+  condition: and(succeeded(), eq(variables['build.sourceBranch'], 'refs/heads/master'))
+  jobs:
+  - job: Release
+    variables:
+      k8sNamespace: 'phippyandfriends'
+      # define 4 more variables: aks, spId, spSecret and spTenantId in the pipeline definition UI
+    displayName: deploy helm chart into AKS
+    pool:
+      vmImage: $(vmImage)
+    steps:
+    #- task: HelmInstaller@0
+    #  displayName: 'install helm'
+    #  inputs:
+    #    helmVersion: $(helmVersion)
+    #    checkLatestHelmVersion: false
+    - bash: |
+        az login --service-principal -u $(spId) -p $(spSecret) --tenant $(spTenantId)
+        az aks get-credentials -n $(aks) -g $(aks)
+        helm init --upgrade --wait --service-account tiller
+        helm repo add $(registryName) https://$(registryName).azurecr.io/helm/v1/repo --username $(registryLogin) --password $(registryPassword)
+        helm upgrade --namespace $(k8sNamespace) --install --wait --version $(build.buildId) --set service.type=LoadBalancer --set image.repository=$(registryServerName)/$(projectName) --set image.tag=$(build.buildId) $(projectName) $(registryName)/$(projectName)
+      displayName: 'deploy helm chart'
