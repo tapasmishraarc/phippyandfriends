@@ -94,7 +94,7 @@ stages:
             --service-account tiller
         helm repo add \
             $(registryName) \
-            https://$(registryName).azurecr.io/helm/v1/repo \
+            https://$(registryServerName)/helm/v1/repo \
             --username $(registryLogin) \
             --password $(registryPassword)
         helm upgrade \
