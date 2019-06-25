@@ -1,0 +1,41 @@
+parameters:
+  aksSpId: ''
+  aksSpSecret: ''
+  aksSpTenantId: ''
+  aks: ''
+
+steps:
+#- task: HelmInstaller@0
+#  displayName: 'install helm'
+#  inputs:
+#    helmVersion: $(helmVersion)
+#    checkLatestHelmVersion: false
+- bash: |
+   az login \
+        --service-principal \
+        -u ${{ parameters.aksSpId }} \
+        -p ${{ parameters.aksSpSecret }} \
+        --tenant ${{ parameters.aksSpTenantId }}
+    az aks get-credentials \
+        -n ${{ parameters.aks }} \
+        -g ${{ parameters.aks }}
+    helm init \
+        --upgrade \
+        --wait \
+        --service-account tiller \
+        --force-upgrade
+    helm repo add \
+        $(registryName) \
+        https://$(registryServerName)/helm/v1/repo \
+        --username $(registryLogin) \
+        --password $(registryPassword)
+    helm upgrade \
+        --namespace $(k8sNamespace) \
+        --install \
+        --wait \
+        --version $(build.buildId) \
+        --set image.repository=$(registryServerName)/$(projectName) \
+        --set image.tag=$(build.buildId) \
+        $(projectName) \
+        $(registryName)/$(projectName)
+  displayName: 'deploy helm chart'
