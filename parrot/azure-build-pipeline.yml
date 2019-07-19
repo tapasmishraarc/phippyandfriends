@@ -22,10 +22,17 @@ steps:
   displayName: 'docker build'
 
 - bash: |
+    echo "registry server name" $(registryLogin)
     docker login $(registryServerName) -u $(registryLogin) -p $(registryPassword)
     docker push $(registryServerName)/$(imageName):$(build.buildId)
   displayName: 'docker push'
   condition: and(succeeded(), eq(variables['build.sourceBranch'], 'refs/heads/master'))
+  
+- task: PublishBuildArtifacts@1
+  displayName: 'publish yaml folder as an artifact'
+  inputs:
+    artifactName: 'parrot'
+    pathToPublish: 'parrot'
 
 - task: HelmInstaller@0
   displayName: 'Install Helm'
